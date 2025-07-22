@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar/Sidebar';
 import LessonView from './components/LessonView/Lessionview.jsx';
-import IDE from './components/IDE/Terminal';
-// IMPORT the real service function
+import IdeModal from './components/IDE/IdeModal.jsx';
 import { fetchLessonContent } from './services/geminiService.js';
 
-
-// Mock data for the initial course structure.
-const courseData = {
+const initialCourseData = {
   title: "AI Python Tutor",
   modules: [
     {
       title: "Module 1: Getting Started",
       lessons: [
-        { id: 1, title: "Variables & Data Types", completed: true },
+        { id: 1, title: "Variables & Data Types", completed: false },
         { id: 2, title: "Conditional Statements", completed: false },
         { id: 3, title: "Introduction to Strings", completed: false },
       ],
@@ -28,59 +25,110 @@ const courseData = {
   ],
 };
 
-// DELETED the mock fetchLessonContent function that was here.
 
 function App() {
-  const [activeLesson, setActiveLesson] = useState(courseData.modules[0].lessons[1]);
+  const [courseData, setCourseData] = useState(initialCourseData);
+  
+  // --- CHANGE 1: Initialize activeLesson to null ---
+  // This prevents the app from crashing on the first render.
+  const [activeLesson, setActiveLesson] = useState(null); 
+
   const [lessonContent, setLessonContent] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isTaskCompleted, setIsTaskCompleted] = useState(false);
+  const [isIdeOpen, setIsIdeOpen] = useState(false);
 
-  // This effect runs when the activeLesson changes.
+  // --- CHANGE 2: Add a new useEffect to safely set the initial lesson ---
+  // This hook runs only once after the component mounts.
   useEffect(() => {
-    // Now this calls the real service function.
-    const loadLesson = async () => {
-      setIsLoading(true);
-      const content = await fetchLessonContent(activeLesson.title);
-      setLessonContent(content);
-      setIsLoading(false);
-    };
-    loadLesson();
+    const firstLesson = initialCourseData?.modules?.[0]?.lessons?.[0];
+    if (firstLesson) {
+      setActiveLesson(firstLesson);
+    } else {
+        setIsLoading(false); // Stop loading if there are no lessons
+    }
+  }, []); // The empty array [] ensures this runs only once.
+
+
+  // This effect now safely fetches content when activeLesson is set.
+  useEffect(() => {
+    // --- CHANGE 3: Add a check to ensure activeLesson is not null ---
+    if (activeLesson) {
+      const loadLesson = async () => {
+        setIsLoading(true);
+        setIsTaskCompleted(activeLesson.completed);
+        const content = await fetchLessonContent(activeLesson.title);
+        setLessonContent(content);
+        setIsLoading(false);
+      };
+      loadLesson();
+    }
   }, [activeLesson]);
 
   const handleLessonClick = (lesson) => {
     setActiveLesson(lesson);
   };
 
-  const handleCustomTopicSubmit = async (topic) => {
-    console.log("User wants to learn about:", topic);
-    // Create a temporary lesson object
+  const handleCustomTopicSubmit = (topic) => {
     const customLesson = { id: Date.now(), title: topic, completed: false };
     setActiveLesson(customLesson);
   };
+  
+  const handleTaskSubmit = () => {
+    setIsTaskCompleted(true);
+    setCourseData(prevData => {
+      const newModules = prevData.modules.map(module => ({
+        ...module,
+        lessons: module.lessons.map(lesson =>
+          lesson.id === activeLesson.id ? { ...lesson, completed: true } : lesson
+        )
+      }));
+      return { ...prevData, modules: newModules };
+    });
+  };
+
+  const handleNextLesson = () => {
+      const allLessons = courseData.modules.flatMap(m => m.lessons);
+      const currentIndex = allLessons.findIndex(l => l.id === activeLesson.id);
+      if (currentIndex !== -1 && currentIndex < allLessons.length - 1) {
+          setActiveLesson(allLessons[currentIndex + 1]);
+      } else {
+          console.log("Course complete!");
+      }
+  };
+
+  // Render a loading state if there's no active lesson yet
+  if (!activeLesson) {
+      return <div className="w-screen h-screen flex items-center justify-center bg-slate-100 text-slate-600">Loading Course...</div>;
+  }
 
   return (
-    <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
-      <Sidebar 
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+      <Sidebar
         course={courseData}
         activeLesson={activeLesson}
         onLessonClick={handleLessonClick}
         onCustomTopicSubmit={handleCustomTopicSubmit}
       />
       
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto">
-          <LessonView 
-            lesson={activeLesson}
-            content={lessonContent}
-            isLoading={isLoading} 
-          />
-          <IDE 
-            key={activeLesson.id} // Force re-mount on lesson change
-            initialCode={lessonContent?.initialCode}
-            isLoading={isLoading}
-          />
-        </main>
-      </div>
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <LessonView
+          lesson={activeLesson}
+          content={lessonContent}
+          isLoading={isLoading}
+          isTaskCompleted={isTaskCompleted}
+          onNextLesson={handleNextLesson}
+          onStartChallenge={() => setIsIdeOpen(true)}
+        />
+      </main>
+
+      <IdeModal
+        isOpen={isIdeOpen}
+        onClose={() => setIsIdeOpen(false)}
+        initialCode={lessonContent?.initialCode}
+        onTaskSubmit={handleTaskSubmit}
+        lessonTitle={activeLesson.title}
+      />
     </div>
   );
 }
